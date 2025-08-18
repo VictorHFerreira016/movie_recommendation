@@ -17,6 +17,19 @@ The simplest and most guaranteed way to run this application is using Docker, as
 * [Git](https://git-scm.com/)
 * [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 
+## ⚙️ Data Config
+
+Before execute the project, it is necessary to download the dataset.
+
+1. Do the download of "TMDB 5000 Movie Dataset" from Kaggle:
+    * **Link:** [https://www.kaggle.com/datasets/tmdb/tmdb-movie-metadata](https://www.kaggle.com/datasets/tmdb/tmdb-movie-metadata)
+
+2. After download, extract the zip file.
+
+3. Create a folder in THE ROOT called: `data/raw/`.
+
+4. Copy the files `tmdb_5000_credits.csv` and `tmdc_5000_moveis.csv` inside the folder `data/raw/`.
+
 ### Steps
 
 1.  **Clone the repository**
