@@ -1,12 +1,59 @@
+# Python
 venv/
 .venv/
-
+env/
+ENV/
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
 
-.git/
-.gitignore
-
+# IDEs
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Jupyter
+notebooks/
+*.ipynb
+.ipynb_checkpoints/
+
+# Tests
+tests/
+pytest_cache/
+.pytest_cache/
+
+# Dados processados (serão gerados no container)
+data/data_processed/
+data/processed/
+
+# Logs e cache
+*.log
+.cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentação
+README.md
+LICENSE.txt
+.github/
+
+# Arquivos temporários
+*.tmp
+*.bak
+*.swp

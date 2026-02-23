@@ -1,131 +1,147 @@
-import gradio as gr
+import streamlit as st
 import pandas as pd
-from pathlib import Path
-from scripts.utils import save_artifact, load_artifact
+from rapidfuzz import process, fuzz
+from scripts.recommender import MovieRecommender
+from scripts.config import settings
+from scripts.visualization import generate_similarity_chart, generate_wordcloud_chart
 
-from scripts.config import DATA_RAW
-from scripts.preprocessing import clean_df_credits, clean_df_movies, calculate
+st.set_page_config(page_title="Recomendação de Filmes", layout="wide", page_icon="🎬")
 
-# ARTIFACTS_DIR is the directory where processed artifacts are stored. It gets from the function Path, so it is created if it doesn't exist.
-ARTIFACTS_DIR = Path("artifacts")
-# exist_ok=True allows the directory to be created if it doesn't exist.
-ARTIFACTS_DIR.mkdir(exist_ok=True)
+@st.cache_resource
+def load_recommender():
+    return MovieRecommender(use_embeddings=settings.USE_EMBEDDINGS)
 
-# ARTIFACTS_DIR is an object, so we can use the / operator to create paths.
-DF_PATH = ARTIFACTS_DIR / "df_processed.joblib"
-SIM_PATH = ARTIFACTS_DIR / "cosine_sim.joblib"
+@st.cache_data
+def load_movies():
+    df = pd.read_csv(settings.DATA_PROCESSED / "movies_clean.csv")
+    if 'movie_id' in df.columns and 'id' not in df.columns:
+        df = df.rename(columns={'movie_id': 'id'})
+    return df['title'].str.title().tolist(), df
 
-# from config, DATA_RAW retrieves the raw data paths.
-CREDITS_CSV_PATH = DATA_RAW / "tmdb_5000_credits.csv"
-MOVIES_CSV_PATH = DATA_RAW / "tmdb_5000_movies.csv"
+def fuzzy_search(query, choices, limit=10):
+    if not query:
+        return []
+    results = process.extract(query, choices, scorer=fuzz.WRatio, limit=limit)
+    return [match[0] for match in results if match[1] > 50]
 
-# Load and prepare the data for the interface.
-def load_and_prepare():
-    # verifies if processed artifacts exist, if not it loads and processes the raw data.
-    if DF_PATH.exists() and SIM_PATH.exists():
-        df = load_artifact(DF_PATH)
-        cosine_sim = load_artifact(SIM_PATH)
+def main():
+    st.title("🎬 Sistema de Recomendação de Filmes")
+    st.markdown("### Busca inteligente com explicações geradas por IA")
+    
+    movie_titles, movies_df = load_movies()
+    recommender = load_recommender()
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        search_query = st.text_input(
+            "🔍 Digite o nome do filme:", 
+            placeholder="Ex: Dark Knight, Inception, Avatar..."
+        )
+    
+    with col2:
+        top_n = st.slider("Qtd. recomendações:", 3, 15, 10)
+    
+    if search_query:
+        matches = fuzzy_search(search_query, movie_titles, limit=15)
+        
+        if matches:
+            selected_movie = st.selectbox("📽️ Filmes encontrados:", matches, key="search_select")
+        else:
+            st.warning("⚠️ Nenhum filme encontrado. Tente outro termo.")
+            return
     else:
-        df_credits = pd.read_csv(CREDITS_CSV_PATH)
-        df_movies = pd.read_csv(MOVIES_CSV_PATH)
-        df_credits_clean = clean_df_credits(df_credits)
-        df_movies_clean = clean_df_movies(df_movies)
-        # Convert 'title' columns to lowercase for case-insensitive matching
-        # The method get() retrieves a value from a DataFrame column, returning a default if the column is not found.
-        # '' means an empty string will be used if the column is not found.
-        df_credits_clean['title'] = df_credits_clean.get('title', '').astype(str).str.lower()
-        df_movies_clean['title'] = df_movies_clean.get('title', '').astype(str).str.lower()
-        # Merge the two DataFrames on the 'title' column, using an inner join to keep only matching titles.
-        # 'inner' means that only rows with matching titles in both DataFrames will be kept.
-        df = pd.merge(df_movies_clean, df_credits_clean, on='title', how='inner')
-        # Creating corpus.
-        # strip() removes leading and trailing whitespace.
-        df['corpus'] = (
-            df.get('corpus', '').astype(str) + ' ' +
-            df.get('cast', '').astype(str) + ' ' +
-            df.get('director', '').astype(str) + ' ' +
-            df.get('screenwriter', '').astype(str)
-        ).str.strip()
-        cosine_sim = calculate(df)
-        save_artifact(df, DF_PATH)
-        save_artifact(cosine_sim, SIM_PATH)
-    # reset_index() is used to reset the index of the DataFrame. 
-    # It means that the old index is discarded and a new sequential index is created.
-    # drop=True means that the old index is not added as a column in the new DataFrame.
-    return df.reset_index(drop=True), cosine_sim
-
-df, cosine_sim = load_and_prepare()
-
-def get_recommendations(movie_title, top_n):
-    # idxs is a list of indices where the movie title matches
-    # index[] is used to access the index of the DataFrame
-    # df['title'] is the column we are interested in, and df['title'] == movie_title.lower() 
-    # checks for matches
-    # tolist() converts the index to a list
-    idxs = df.index[df['title'] == movie_title.lower()].tolist()
-    # If no matches are found, return a message and None for the wordcloud
-    if not idxs:
-        return "Movie not found.", None
-    # idx is the index of the matching movie
-    idx = idxs[0]
-    # enumerate() is used to get the index and value of the cosine similarity scores
-    # cosine_sim[idx] retrieves the cosine similarity scores for the matching movie
-    # so sims is a list of tuples (index, score)
-    sims = list(enumerate(cosine_sim[idx]))
-    # sorted() is used to sort the similarity scores in descending order
-    # the first parameter sims is the list to be sorted
-    # the second parameter key specifies a function of one argument that is used to 
-    # extract a comparison key from each element in the list
-    # so x[1] retrieves the score
-    sims = sorted(sims, key=lambda x: x[1], reverse=True)
-    # Get the top N recommendations
-    sims = sims[1:top_n+1]
-    # the list comprehension gets the indexes of the top_n 
-    indices = [i for i, s in sims]
-    titles = df.iloc[indices]['title'].str.title().tolist()
-    # the list comprehension gets the scores of the top_n
-    # :.4f is a format specifier that limits the number of decimal places to 4
-    scores = [f"{s:.4f}" for i, s in sims]
-    # zip() is used to combine the titles and scores into pairs,
-    # it returns a list of tuples
-    # and then we join them into a string with the format "title (score)"
-    result = "\n".join([f"{t} (score: {s})" for t, s in zip(titles, scores)])
-    try:
-        from wordcloud import WordCloud
-        text = " ".join(df.iloc[indices]['corpus'].astype(str).tolist())
-        wc = WordCloud(width=800, height=400, background_color='white', max_words=150).generate(text)
-        # it returns the result and the wordcloud, the use of "to_array()" is to convert the image to a format suitable for display
-        # because wc at this moment is number
-        return result, wc.to_array() 
-    except Exception:
-        return result, None
-
-# Function to search for movies based on a query
-def search_movies(title):
-    title = title.lower()
-    # first the list comprehension gets the unique titles, example: "the godfather"
-    # and then verifies if the title is in the unique title
-    return [t for t in df['title'].unique() if title in t]
-
-# Blocks() is a Gradio component that allows you to create a user interface with multiple components.
-with gr.Blocks() as demo:
-    gr.Markdown("# Movie Recommendation")
-    movie_select = gr.Dropdown(
-        choices=sorted(df['title'].str.title().unique()),
-        label="Choose a movie"
-    )
-    top_n = gr.Slider(1, 20, value=5, label="Number of recommendations")
-    output_recs = gr.Textbox(label="Similar movies")
-    output_cloud = gr.Image(label="Wordcloud")
-
-    gr.Button("Recommend").click(
-        # fn specifies the function to be called when the button is clicked
-        fn=get_recommendations,
-        inputs=[movie_select, top_n],
-        outputs=[output_recs, output_cloud]
-    )
+        selected_movie = st.selectbox("📽️ Ou escolha da lista:", [""] + movie_titles, key="list_select")
+    
+    if not selected_movie:
+        st.info("👆 Digite ou selecione um filme para começar")
+        return
+    
+    if st.button("✨ Gerar Recomendações", type="primary", use_container_width=True):
+        with st.spinner("🤖 Analisando e gerando explicações com IA..."):
+            movie_row = movies_df[movies_df['title'].str.title() == selected_movie]
+            
+            if movie_row.empty:
+                st.error("❌ Filme não encontrado no banco de dados")
+                return
+            
+            movie_id = movie_row.iloc[0]['id']
+            recommendations = recommender.recommend_by_movie_id(movie_id, top_n=top_n)
+            
+            if not recommendations:
+                st.warning("⚠️ Nenhuma recomendação encontrada")
+                return
+            
+            st.success(f"🎯 **{top_n}** recomendações para: **{selected_movie}**")
+            st.divider()
+            
+            tab1, tab2, tab3 = st.tabs(["📋 Recomendações", "📊 Gráfico de Similaridade", "☁️ Nuvem de Palavras"])
+            
+            with tab1:
+                st.markdown("#### 🎥 Filmes Recomendados")
+                st.markdown("*Clique em 'Por que este filme?' para ver a análise da IA*")
+                st.write("")
+                
+                for i, rec in enumerate(recommendations, 1):
+                    col1, col2 = st.columns([4, 1])
+                    
+                    with col1:
+                        st.markdown(f"**{i}. {rec['title'].title()}**")
+                    
+                    with col2:
+                        st.metric("Similaridade", f"{rec['score']:.1%}")
+                    
+                    with st.expander(f"🤖 Por que **{rec['title'].title()}**?"):
+                        st.markdown("**Análise da IA:**")
+                        st.info(rec['explanation'])
+                        
+                        movie_info = movies_df[movies_df['id'] == rec['id']]
+                        if not movie_info.empty:
+                            genres = movie_info.iloc[0].get('genres', 'N/A')
+                            overview = movie_info.iloc[0].get('overview', 'N/A')
+                            
+                            st.markdown("**Detalhes:**")
+                            st.markdown(f"- **Gêneros:** {genres}")
+                            if overview and overview != 'N/A':
+                                st.markdown(f"- **Sinopse:** {overview[:200]}...")
+                    
+                    st.divider()
+            
+            with tab2:
+                st.markdown("#### 📊 Comparação de Similaridade")
+                titles = [rec['title'].title() for rec in recommendations]
+                scores = [rec['score'] for rec in recommendations]
+                
+                chart_b64 = generate_similarity_chart(titles, scores, selected_movie)
+                st.markdown(f'<img src="data:image/png;base64,{chart_b64}" style="width:100%"/>', 
+                           unsafe_allow_html=True)
+                
+                st.caption("Quanto maior a barra, mais similar o filme é ao escolhido")
+            
+            with tab3:
+                st.markdown("#### ☁️ Palavras-chave dos Filmes Recomendados")
+                rec_ids = [rec['id'] for rec in recommendations]
+                corpus_texts = movies_df[movies_df['id'].isin(rec_ids)]['corpus'].fillna('').tolist()
+                
+                if corpus_texts:
+                    wc_b64 = generate_wordcloud_chart(corpus_texts)
+                    st.markdown(f'<img src="data:image/png;base64,{wc_b64}" style="width:100%"/>', 
+                               unsafe_allow_html=True)
+                    st.caption("📌 Palavras maiores = termos mais frequentes nos filmes recomendados")
+                else:
+                    st.warning("⚠️ Dados insuficientes para gerar nuvem de palavras")
+            
+            with st.sidebar:
+                st.markdown("### 📊 Estatísticas")
+                st.metric("Total de recomendações", len(recommendations))
+                avg_score = sum(r['score'] for r in recommendations) / len(recommendations)
+                st.metric("Similaridade média", f"{avg_score:.1%}")
+                
+                st.markdown("---")
+                st.markdown("### ℹ️ Sobre")
+                method = "🧠 Embeddings + Pinecone" if settings.USE_EMBEDDINGS else "📝 TF-IDF"
+                st.markdown(f"**Método:** {method}")
+                st.markdown(f"**Modelo LLM:** {settings.GROQ_MODEL}")
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0")
-    # to run local
-    # demo.launch()
+    main()

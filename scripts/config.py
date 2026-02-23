@@ -1,12 +1,58 @@
-# The function Path is used to colect the relative Path of the user.
 from pathlib import Path
-# BASE_DIR stores the base directory of the project. 
-# "__file__" is a special variable that holds the path of the current file.
-# ".parent" is used to get the parent directory of the current file. Parent means the directory 
-# that contains the current file. Ex.: /home/user/project/scripts/config.py, if ".parent" is applied 
-# it will return /home/user/project/scripts.
+from functools import lru_cache
+from typing import List, ClassVar
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 BASE_DIR = Path(__file__).parent.parent
-# DATA_RAW is the directory where the raw data is stored. It colects BASE_DIR, and add with
-# "data" and "raw" to create the full path. And it do the same with IMG_DIR.
-DATA_RAW = BASE_DIR / "data" / "raw"
-IMG_DIR = BASE_DIR / "data" / "images"
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file = BASE_DIR / ".env",
+        env_file_encoding = "utf-8",
+        case_sensitive = False,
+        extra = "ignore"
+    )
+
+    DATA_RAW: ClassVar[Path] = BASE_DIR / "data" / "data_raw"
+    DATA_PROCESSED: ClassVar[Path] = BASE_DIR / "data" / "data_processed"
+
+    CORS_ORIGINS: List[str] = ["*"]
+
+    APP_NAME: str = "Movie Recommendation System"
+    APP_VERSION: str = "2.0.0"
+
+    GROQ_API_KEY: str = Field(..., description="Groq API Key for LLM")
+    GROQ_MODEL: str = "llama3-70b-8192"
+    GROQ_TEMPERATURE: float = 0.7
+    GROQ_MAX_TOKENS: int = 2048
+
+    EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+    EMBEDDING_DIMENSION: int = 384
+    EMBEDDING_BATCH_SIZE: int = 32
+
+    PINECONE_API_KEY: str = Field(..., description="Pinecone API Key")
+    PINECONE_ENVIRONMENT: str = Field(..., description="Pinecone Environment")
+    PINECONE_INDEX_NAME: str = "movie-recommendation"
+    PINECONE_NAMESPACE: str = "default"
+
+    CHUNK_SIZE: int = 500
+    CHUNK_OVERLAP: int = 100
+    RETRIEVAL_TOP_K: int = 5
+    SIMILARITY_THRESHOLD: float = 0.7
+
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+
+    USE_EMBEDDINGS: bool = True
+    ENABLE_EXPLANATIONS: bool = True
+
+    # paths for storing numpy arrays; use Path so we can access .parent etc.
+    EMBEDDINGS_PATH: ClassVar[Path] = BASE_DIR / "data" / "processed" / "movies_embeddings.npy"
+    MOVIE_IDS_PATH: ClassVar[Path] = BASE_DIR / "data" / "processed" / "movie_ids.npy"
+
+@lru_cache()
+def get_settings():
+    return Settings() # type: ignore
+
+settings = get_settings()

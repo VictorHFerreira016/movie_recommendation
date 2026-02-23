@@ -1,35 +1,52 @@
 import matplotlib.pyplot as plt
 from wordcloud import WordCloud
-import os
+import io
+import base64
 
-def generate_graph(X, y, movie_name, path):
-    # The method figure creates a new figure for plotting.
-    # (10, 5): is the parameters, ta indicates the size.
-    plt.figure(figsize=(10,5))
-    # The barh function creates a horizontal bar chart.
-    plt.barh(X, y)
-    plt.xlabel(f'Similarity')
-    plt.title(f'Top 5 similar movies to {movie_name}')
-    # The gca function returns the current Axes instance on the current figure.
-    # Invert_yaxis reverses the y-axis so that the highest values are at the top.
-    plt.gca().invert_yaxis()
-    plt.savefig(os.path.join(path, f'{movie_name}_similarity.png'))
-    plt.show()
+def generate_similarity_chart(titles, scores, movie_name):
+    fig, ax = plt.subplots(figsize=(10, 6))
+    bars = ax.barh(titles, scores, color='#1f77b4')
+    
+    for bar in bars:
+        width = bar.get_width()
+        ax.text(width, bar.get_y() + bar.get_height()/2, 
+                f'{width:.1%}', 
+                ha='left', va='center', fontsize=9, color='black')
+    
+    ax.set_xlabel('Similaridade', fontsize=12)
+    ax.set_title(f'Top {len(titles)} filmes similares a "{movie_name}"', fontsize=14, fontweight='bold')
+    ax.invert_yaxis()
+    ax.set_xlim(0, max(scores) * 1.15)
+    plt.tight_layout()
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+    buf.seek(0)
+    plt.close(fig)
+    
+    return base64.b64encode(buf.read()).decode()
 
-# Generating word cloud
-def generate_wc(index, df, movie_name, path):
-    # corpus is a list of text data for the word cloud
-    # df.iloc[i]['corpus'] retrieves the 'corpus' column for the i-th row.
-    corpus = [df.iloc[i]['corpus'] for i in index]
-    # join the text from the corpus
-    text = " ".join(corpus)
-    # Generate the word cloud it is a class.
-    # .generate() creates the word cloud from the text.
-    wc = WordCloud(width=800, height=500, background_color='white').generate(text)
-    plt.figure(figsize=(10, 5))
-    # imshow displays the image, interpolation='bilinear' smoothens the image.
-    plt.imshow(wc, interpolation='bilinear')
-    # axis("off") turns off the axis.
-    plt.axis("off")
-    plt.savefig(os.path.join(path, f'{movie_name}_wordcloud.png'))
-    plt.show()
+def generate_wordcloud_chart(corpus_texts):
+    text = " ".join(corpus_texts)
+    
+    wc = WordCloud(
+        width=800, 
+        height=400, 
+        background_color='white',
+        colormap='viridis',
+        max_words=50,
+        min_font_size=10
+    ).generate(text)
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.imshow(wc, interpolation='bilinear')
+    ax.axis("off")
+    ax.set_title("Palavras-chave dos filmes recomendados", fontsize=14, fontweight='bold', pad=20)
+    plt.tight_layout()
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+    buf.seek(0)
+    plt.close(fig)
+    
+    return base64.b64encode(buf.read()).decode()

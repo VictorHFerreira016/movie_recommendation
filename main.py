@@ -1,29 +1,40 @@
 import pandas as pd
 import logging
-from scripts.preprocessing import clean_df_credits, clean_df_movies, recommend_movie_with_scores, calculate
-from scripts.config import DATA_RAW
+from scripts.preprocessing import clean_df_credits, clean_df_movies, generate_embeddings_if_needed
+from scripts.config import settings
+from scripts.recommender import MovieRecommender
+import argparse
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
-def pipeline():
+def pipeline(method=None):
+    """
+    method: 'tfidf' or 'embeddings'. If None, it uses the value of config.USE_EMBEDDINGS.
+    """
     logging.info("Starting pipeline.")
+    
     try:
-        logging.info("Carregando os datasets...")
-        df_credits = pd.read_csv(DATA_RAW / "tmdb_5000_credits.csv")    
-        df_movies = pd.read_csv(DATA_RAW / "tmdb_5000_movies.csv")
-        logging.info("Datasets successfully loaded.")
-    except FileNotFoundError as e:
-        logging.error(f"Error to load data: {e}.")
+        logging.info("Carregando datasets...")
 
-    logging.info("Starting data processing...")
+        df_credits = pd.read_csv(settings.DATA_RAW / "tmdb_5000_credits.csv")
+        df_movies = pd.read_csv(settings.DATA_RAW / "tmdb_5000_movies.csv")
+
+    except FileNotFoundError as e:
+
+        logging.error(f"Erro ao carregar dados: {e}")
+        return
+
+    logging.info("Limpando dados...")
+
     df_credits_cleaned = clean_df_credits(df_credits)
     df_movies_cleaned = clean_df_movies(df_movies)
-    logging.info("Load successfully!")
-
     df_credits_cleaned['title'] = df_credits_cleaned['title'].str.lower()
     df_movies_cleaned['title'] = df_movies_cleaned['title'].str.lower()
     df_merged = pd.merge(df_movies_cleaned, df_credits_cleaned, on='title', how='inner')
-    logging.info(f"DataFrames merged! Shape: {df_merged.shape}")
+
+    logging.info(f"Merge concluído! Shape: {df_merged.shape}")
+
+    df_merged['id'] = df_merged['movie_id']
 
     df_merged['corpus'] = (
         df_merged['corpus'].astype(str) + ' ' +
@@ -32,32 +43,47 @@ def pipeline():
         df_merged['screenwriter'].astype(str)
     )
 
-    logging.info("Calculating cossine similarity...")
-    cosine_sim_matrix = calculate(df_merged)
-    logging.info("Finished!")
+    df_merged.to_csv(settings.DATA_PROCESSED / "movies_clean.csv", index=False)
 
-    try:
-        movie_title = 'The Dark Knight Rises'
-        movie_index = df_merged[df_merged['title'] == movie_title.lower()].index[0]
-        logging.info(f"Gerating recommendations for '{movie_title}' (index: {movie_index}).")
-        
-        titles, scores = recommend_movie_with_scores(
-            movie_index=movie_index,
-            cosine_sim=cosine_sim_matrix,
-            df=df_merged,
-            top_n=10
-        )
+    logging.info("DataFrame limpo salvo em data/processed/movies_clean.csv")
 
-        if titles:
-            print("\n--- Recommendations ---")
-            for title, score in zip(titles, scores):
-                print(f"- {title.title()} (Similarity: {score:.4f})")
-            print("---------------------\n")
+    generate_embeddings_if_needed(df_merged)
 
-    except IndexError:
-        logging.error(f"The movie '{movie_title}' was not found on the dataset.")
+    if method == 'tfidf':
+        use_emb = False
+    elif method == 'embeddings':
+        use_emb = True
+    else:
+        use_emb = settings.USE_EMBEDDINGS 
+
+    recommender = MovieRecommender(use_embeddings=use_emb)
+
+    movie_title = 'The Dark Knight Rises'
+    movie_row = df_merged[df_merged['title'] == movie_title.lower()]
+    if movie_row.empty:
+
+        logging.error(f"Filme '{movie_title}' não encontrado.")
+        return
+
+    movie_id = movie_row.iloc[0]['movie_id']  
+
+    logging.info(f"Gerando recomendações para '{movie_title}' (ID: {movie_id}) usando método: {'embeddings' if use_emb else 'tfidf'}")
     
-    logging.info("Pipeline successfully completed!")
+    recommendations = recommender.recommend_by_movie_id(movie_id, top_n=10)
+
+    if recommendations:
+        print("\n--- Recomendações ---")
+        for i, rec in enumerate(recommendations, 1):
+            print(f"{i}. {rec['title'].title()}")
+            print(f"   Similaridade: {rec['score']:.2%}")
+            print(f"   {rec['explanation']}")
+            print()
+        print("---------------------\n")
+    else:
+        logging.warning("Nenhuma recomendação encontrada.")
 
 if __name__ == "__main__":
-    pipeline()
+    parser = argparse.ArgumentParser(description="Recomendação de filmes")
+    parser.add_argument('--method', choices=['tfidf', 'embeddings'], help='Método de recomendação (tfidf ou embeddings)')
+    args = parser.parse_args()
+    pipeline(method=args.method)

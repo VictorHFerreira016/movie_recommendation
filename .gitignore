@@ -1,6 +1,10 @@
 venv
 .venv
 env/
+
+.env
+scripts/.env
+
 venv.bak
 __pycache__
 .pyc
@@ -15,3 +19,5 @@ Thumbs.db
 
 artifacts/
 data/
+
+estrutura.py
