@@ -8,8 +8,13 @@ from langchain_core.prompts import PromptTemplate
 import logging
 from scripts.config import settings
 from scripts.embeddings import get_pinecone_index
+import os
 
 logging.basicConfig(level=logging.INFO)
+
+os.environ['LANGCHAIN_TRACING_V2'] = str(settings.LANGCHAIN_TRACING_V2).lower()
+os.environ['LANGCHAIN_API_KEY'] = settings.LANGCHAIN_API_KEY
+os.environ['LANGCHAIN_PROJECT'] = settings.LANGCHAIN_PROJECT
 
 class MovieRecommender:
     def __init__(self, use_embeddings=None):
@@ -28,18 +33,19 @@ class MovieRecommender:
             logging.info("Conectando ao Pinecone...")
             self.index = get_pinecone_index()
             self.model = SentenceTransformer(settings.EMBEDDING_MODEL)
-            
-            if settings.ENABLE_EXPLANATIONS:
-                self.llm = ChatGroq(
-                    api_key=settings.GROQ_API_KEY, # type: ignore
-                    model=settings.GROQ_MODEL,
-                    temperature=settings.GROQ_TEMPERATURE
-                )
+
         else:
             logging.info("Usando TF-IDF...")
             self.tfidf_vectorizer = TfidfVectorizer(stop_words='english', ngram_range=(1, 2), max_features=20000)
             self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(self.movies_df['corpus'])
             self.movies_df = self.movies_df.reset_index(drop=True)
+
+        if settings.ENABLE_EXPLANATIONS:
+            self.llm = ChatGroq(
+                api_key=settings.GROQ_API_KEY, # type: ignore
+                model=settings.GROQ_MODEL,
+                temperature=settings.GROQ_TEMPERATURE
+            )
         
     def _generate_explanation(self, original_movie, recommended_movie, score, original_genres="", rec_genres="", original_overview="", rec_overview=""):
         if not settings.ENABLE_EXPLANATIONS:
@@ -48,26 +54,29 @@ class MovieRecommender:
         try:
             prompt = PromptTemplate(
                 input_variables=["movie1", "movie2", "score", "genres1", "genres2", "overview1", "overview2"],
-                template="""Você é um especialista em cinema. Explique em 2-3 frases curtas e objetivas por que '{movie2}' é similar a '{movie1}' (similaridade: {score:.0%}).
+                template="""Você é um assistente de crítico de cinema conciso.
+                        Tarefa: Explique em UMA frase por que '{movie2}', genêro: {genres2}, e enredo: {overview2}.
+                        É semelhante a '{movie1}', genêro: {genres1}, e enredo: {overview1}.
+                        Pontuação de similaridade: {score}
+                        Concentre-se APENAS em um destes aspectos (escolha o mais relevante):
+                        - Sobreposição de gênero e subgênero
+                        - Estrutura narrativa ou temas
+                        - Estilo do diretor/elenco
+                        - Tom e atmosfera
 
-    Filme 1: {movie1}
-    Gêneros: {genres1}
-    Sinopse: {overview1}
+                        Regras:
+                        - NÃO mencione a pontuação de similaridade
+                        - NÃO comece com 'Ambos os filmes'
+                        - Responda sempre em língua Portuguesa
 
-    Filme 2: {movie2}
-    Gêneros: {genres2}
-    Sinopse: {overview2}
-
-    Foque em: gêneros compartilhados, temas narrativos, tom/atmosfera, ou elementos visuais/estilísticos comuns. Seja específico e natural.
-
-    Explicação:"""
+                        Resposta: """
             )
             
             chain = prompt | self.llm
             response = chain.invoke({
                 "movie1": original_movie,
                 "movie2": recommended_movie,
-                "score": score,
+                "score": f"{score:.1%}",
                 "genres1": original_genres or "Não especificado",
                 "genres2": rec_genres or "Não especificado",
                 "overview1": original_overview[:300] or "Não disponível",

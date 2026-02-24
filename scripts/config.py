@@ -22,7 +22,11 @@ class Settings(BaseSettings):
     APP_NAME: str = "Movie Recommendation System"
     APP_VERSION: str = "2.0.0"
 
-    GROQ_API_KEY: str = Field(..., description="Groq API Key for LLM")
+    LANGCHAIN_TRACING_V2: bool = True
+    LANGCHAIN_API_KEY: str = Field(default="", description="LangSmith API Key")
+    LANGCHAIN_PROJECT: str = "movie_recommender"
+
+    GROQ_API_KEY: str = Field(default="sua_chave_aqui", description="Groq API Key for LLM")
     GROQ_MODEL: str = "llama3-70b-8192"
     GROQ_TEMPERATURE: float = 0.7
     GROQ_MAX_TOKENS: int = 2048
